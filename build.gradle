@@ -30,15 +30,17 @@ ext {
 }
 
 dependencies {
+    implementation 'org.springframework:spring-context-support'
     implementation 'org.springframework.boot:spring-boot-starter-graphql'
     implementation 'org.springframework.boot:spring-boot-starter-security'
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-webflux'
     implementation 'com.netflix.graphql.dgs:graphql-dgs-spring-graphql-starter'
     implementation 'org.springframework.modulith:spring-modulith-starter-core'
+    implementation 'com.github.ben-manes.caffeine:caffeine:3.1.8' // Added Caffeine dependency
     compileOnly 'org.projectlombok:lombok'
     developmentOnly 'org.springframework.boot:spring-boot-devtools'
-    developmentOnly 'org.springframework.boot:spring-boot-docker-compose'
+//    developmentOnly 'org.springframework.boot:spring-boot-docker-compose'
     annotationProcessor 'org.projectlombok:lombok'
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'com.netflix.graphql.dgs:graphql-dgs-spring-graphql-starter-test'
