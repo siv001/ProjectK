@@ -13,26 +13,26 @@ import java.util.concurrent.TimeUnit;
 
 @Configuration
 public class SimpleMultiCacheConfig {
-//
-//    @Bean
-//    public CacheManager cacheManager() {
-//        // Create cache for Service One with a 10-minute expiry and 5-minute refresh
-//        Cache serviceOneCache = new CaffeineCache("serviceOneCache",
-//                Caffeine.newBuilder()
-//                        .expireAfterWrite(10, TimeUnit.MINUTES)
-//                        .refreshAfterWrite(5, TimeUnit.MINUTES)
-//                        .build());
-//
-//        // Create cache for Service Two with a 20-minute expiry and 10-minute refresh
-//        Cache serviceTwoCache = new CaffeineCache("serviceTwoCache",
-//                Caffeine.newBuilder()
-//                        .expireAfterWrite(20, TimeUnit.MINUTES)
-//                        .refreshAfterWrite(10, TimeUnit.MINUTES)
-//                        .build());
-//
-//        SimpleCacheManager cacheManager = new SimpleCacheManager();
-//        cacheManager.setCaches(Arrays.asList(serviceOneCache, serviceTwoCache));
-//
-//        return cacheManager;
-//    }
+
+    @Bean
+    public CacheManager cacheManager() {
+        // Create cache for Service One with a 10-minute expiry and 5-minute refresh
+        Cache serviceOneCache = new CaffeineCache("serviceOneCache",
+                Caffeine.newBuilder()
+                        .expireAfterWrite(10, TimeUnit.MINUTES)
+                        .refreshAfterWrite(5, TimeUnit.MINUTES)
+                        .build());
+
+        // Create cache for Service Two with a 20-minute expiry and 10-minute refresh
+        Cache serviceTwoCache = new CaffeineCache("serviceTwoCache",
+                Caffeine.newBuilder()
+                        .expireAfterWrite(20, TimeUnit.MINUTES)
+                        .refreshAfterWrite(10, TimeUnit.MINUTES)
+                        .build());
+
+        SimpleCacheManager cacheManager = new SimpleCacheManager();
+        cacheManager.setCaches(Arrays.asList(serviceOneCache, serviceTwoCache));
+
+        return cacheManager;
+    }
 }

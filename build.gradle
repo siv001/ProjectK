@@ -38,6 +38,7 @@ dependencies {
     implementation 'com.netflix.graphql.dgs:graphql-dgs-spring-graphql-starter'
     implementation 'org.springframework.modulith:spring-modulith-starter-core'
     implementation 'com.github.ben-manes.caffeine:caffeine:3.1.8' // Added Caffeine dependency
+    implementation 'org.springframework:spring-context-support'
     compileOnly 'org.projectlombok:lombok'
     developmentOnly 'org.springframework.boot:spring-boot-devtools'
 //    developmentOnly 'org.springframework.boot:spring-boot-docker-compose'
@@ -48,6 +49,7 @@ dependencies {
     testImplementation 'org.springframework.graphql:spring-graphql-test'
     testImplementation 'org.springframework.modulith:spring-modulith-starter-test'
     testImplementation 'org.springframework.security:spring-security-test'
+
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
