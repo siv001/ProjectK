@@ -1,6 +1,7 @@
 package org.projectk.config;
 
 import com.github.benmanes.caffeine.cache.Caffeine;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
 import org.springframework.cache.caffeine.CaffeineCache;
@@ -12,10 +13,13 @@ import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
 
 @Configuration
+@ConditionalOnProperty(name = "spring.cache.type", havingValue = "caffeine", matchIfMissing = true)
 public class SimpleMultiCacheConfig {
 
     @Bean
     public CacheManager cacheManager() {
+        SimpleCacheManager cacheManager = new SimpleCacheManager();
+        
         // Create cache for Service One with a 10-minute expiry and 5-minute refresh
         Cache serviceOneCache = new CaffeineCache("serviceOneCache",
                 Caffeine.newBuilder()
@@ -30,8 +34,10 @@ public class SimpleMultiCacheConfig {
                         .refreshAfterWrite(10, TimeUnit.MINUTES)
                         .build());
 
-        SimpleCacheManager cacheManager = new SimpleCacheManager();
         cacheManager.setCaches(Arrays.asList(serviceOneCache, serviceTwoCache));
+        
+        // Important: Initialize the cache manager before returning it
+        cacheManager.afterPropertiesSet();
 
         return cacheManager;
     }
