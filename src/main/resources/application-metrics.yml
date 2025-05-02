@@ -1,0 +1,38 @@
+# Configuration for metrics persistence
+
+# Database configuration (used by DB persistence provider if enabled)
+spring:
+  datasource:
+    url: jdbc:h2:file:./data/metrics
+    username: sa
+    password: 
+    driver-class-name: org.h2.Driver
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+  jpa:
+    hibernate:
+      ddl-auto: update
+    database-platform: org.hibernate.dialect.H2Dialect
+
+# File-based metrics persistence configuration
+metrics:
+  file:
+    enabled: true                      # Enable file-based persistence (default)
+    base-path: ./metrics-data          # Directory to store metrics files
+    flush-interval-ms: 60000           # 60 seconds
+    cleanup-interval-ms: 3600000       # 1 hour
+    retention-days: 30                 # Keep metrics for 30 days
+
+  # Redis TimeSeries persistence configuration (optional)
+  redis:
+    enabled: false                     # Disabled by default
+    host: localhost                    # Redis server host
+    port: 6379                         # Redis server port
+    retention-days: 30                 # Keep metrics for 30 days
+    cleanup-interval-ms: 3600000       # 1 hour
+    # Embedded Redis configuration (for development/testing)
+    embedded:
+      enabled: false                   # Disabled by default
+      # Will only activate with profile: embedded-redis

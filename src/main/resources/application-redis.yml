@@ -1,0 +1,22 @@
+# Configuration for Redis TimeSeries metrics persistence
+
+# Redis Configuration
+spring:
+  redis:
+    host: ${REDIS_HOST:localhost}
+    port: ${REDIS_PORT:6379}
+    # Optional: add password, database, and other connection parameters as needed
+    # password: ${REDIS_PASSWORD:}
+    # database: 0
+    # timeout: 2000
+
+# Metrics persistence configuration
+metrics:
+  redis:
+    enabled: true
+    retention-ms: 2592000000  # 30 days in milliseconds
+    cleanup-interval-ms: 3600000  # 1 hour in milliseconds
+
+  # Disable JDBC persistence when using Redis
+  persistence:
+    enabled: false

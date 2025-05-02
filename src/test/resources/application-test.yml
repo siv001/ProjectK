@@ -1,0 +1,20 @@
+spring:
+  main:
+    allow-bean-definition-overriding: true
+  cache:
+    type: none
+
+# Disable autoconfiguration for problematic components
+spring.autoconfigure.exclude:
+  - org.springframework.boot.autoconfigure.cache.CacheAutoConfiguration
+
+# Circuit breaker test config
+circuit:
+  breaker:
+    name: test-circuit-breaker
+
+# Logging config for tests
+logging:
+  level:
+    org.projectk: DEBUG
+    org.springframework.cache: DEBUG

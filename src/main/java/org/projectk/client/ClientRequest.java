@@ -1,15 +1,13 @@
 package org.projectk.client;
 
-public class ClientRequest<T> {
-    private String url;
-    private T requestBody;
+import org.springframework.http.HttpMethod;
 
-    public ClientRequest(String url, T requestBody) {
-        this.url = url;
-        this.requestBody = requestBody;
-    }
-
-    // Getters
-    public String getUrl() { return url; }
-    public T getRequestBody() { return requestBody; }
-}
+/**
+ * A record representing a client request with a URL, HTTP method, and a body.
+ *
+ * @param <T> The type of the request body
+ * @param url The URL to send the request to
+ * @param method The HTTP method to use for the request
+ * @param requestBody The request body
+ */
+public record ClientRequest<T>(String url, HttpMethod method, T requestBody) {}
