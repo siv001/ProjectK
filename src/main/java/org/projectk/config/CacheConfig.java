@@ -3,11 +3,15 @@ package org.projectk.config;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import org.projectk.service.ServiceOneClient;
 import org.projectk.service.ServiceTwoClient;
+import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.context.annotation.*;
 import org.springframework.scheduling.TaskScheduler;
+import org.springframework.scheduling.annotation.Async;
+import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import org.springframework.web.client.RestTemplate;
 
@@ -18,10 +22,16 @@ import java.util.concurrent.*;
 @Configuration
 @EnableCaching
 @EnableScheduling
+@EnableAsync
 public class CacheConfig {
 
     // Track cache keys with their TTL information
     private final Map<String, CacheKeyInfo> activeCacheKeys = new ConcurrentHashMap<>();
+
+    public Map<String, CacheKeyInfo> getActiveCacheKeys() {
+        return activeCacheKeys;
+    }
+
     private CustomCaffeineCacheManager cacheManager;
     private TaskScheduler taskScheduler;
     
@@ -33,11 +43,22 @@ public class CacheConfig {
     @Bean
     public TaskScheduler taskScheduler() {
         ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
-        scheduler.setPoolSize(1);
+        scheduler.setPoolSize(3); // Increased pool size for better parallel processing
         scheduler.setThreadNamePrefix("cache-refresh-scheduler-");
         scheduler.initialize();
         this.taskScheduler = scheduler;
         return scheduler;
+    }
+    
+    @Bean
+    public Executor cacheRefreshTaskExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(4);
+        executor.setMaxPoolSize(10);
+        executor.setQueueCapacity(25);
+        executor.setThreadNamePrefix("cache-refresh-worker-");
+        executor.initialize();
+        return executor;
     }
 
     @Bean
@@ -65,6 +86,18 @@ public class CacheConfig {
         );
 
         return this.cacheManager;
+    }
+    
+    public CacheManager getCacheManager() {
+        return this.cacheManager;
+    }
+
+    public ScheduledExecutorService getCacheRefreshExecutor() {
+        return cacheRefreshExecutor();
+    }
+
+    public TaskScheduler getTaskScheduler() {
+        return taskScheduler();
     }
     
     /**
@@ -104,41 +137,88 @@ public class CacheConfig {
         if (taskScheduler == null) return;
         
         taskScheduler.schedule(() -> {
-            try {
-                if (cacheManager != null && cacheManager.getCache(keyInfo.getCacheName()) != null) {
-                    System.out.println("Refreshing cache entry: " + keyInfo.getCacheName() + ":" + keyInfo.getKey() + " at " + Instant.now());
+            // The scheduling happens here, but the actual refresh is executed asynchronously
+            refreshCacheAsync(keyInfo);
+        }, keyInfo.getNextRefreshTime());
+    }
+    
+    /**
+     * Asynchronously refreshes a cache entry
+     * @param keyInfo The cache key information
+     */
+    @Async("cacheRefreshTaskExecutor")
+    public void refreshCacheAsync(CacheKeyInfo keyInfo) {
+        try {
+            if (cacheManager != null && cacheManager.getCache(keyInfo.getCacheName()) != null) {
+                String cacheName = keyInfo.getCacheName();
+                Object cachedKey = keyInfo.getKey();
+                Cache cache = cacheManager.getCache(cacheName);
+                
+                System.out.println("Refreshing cache entry asynchronously: " + cacheName + ":" + cachedKey + " at " + Instant.now());
+                
+                // Store the existing value before attempting refresh
+                Cache.ValueWrapper existingValue = cache.get(cachedKey);
+                
+                try {
+                    // Create a new temporary cache key for the fresh fetch
+                    // This allows us to invoke the loader without affecting the original entry
+                    String tempKey = "temp_refresh_" + System.currentTimeMillis() + "_" + cachedKey;
                     
-                    // Force refresh by explicitly removing and then fetching the key
-                    cacheManager.getCache(keyInfo.getCacheName()).evict(keyInfo.getKey());
-                    cacheManager.getCache(keyInfo.getCacheName()).get(keyInfo.getKey());
+                    // Attempt to load the fresh value using a different key
+                    // This will invoke the loader function via the cache's normal mechanisms
+                    Cache.ValueWrapper freshValueWrapper = cache.get(tempKey);
                     
-                    // Reschedule for next TTL period
-                    String cacheKeyStr = keyInfo.getCacheName() + ":" + keyInfo.getKey();
-                    CacheKeyInfo updatedInfo = activeCacheKeys.get(cacheKeyStr);
-                    if (updatedInfo != null) {
-                        // Use the possibly updated TTL value
-                        System.out.println("Next refresh scheduled for: " + updatedInfo.getNextRefreshTime() + " (TTL: " + updatedInfo.getTtlSeconds() + " seconds)");
-                        scheduleRefresh(updatedInfo);
+                    if (freshValueWrapper != null && freshValueWrapper.get() != null) {
+                        // Successfully fetched fresh value, now update the real cache entry
+                        Object freshValue = freshValueWrapper.get();
+                        cache.put(cachedKey, freshValue);
+                        System.out.println("Successfully refreshed cache entry: " + cacheName + ":" + cachedKey);
+                        
+                        // Clean up the temporary entry
+                        cache.evict(tempKey);
+                    } else {
+                        System.out.println("Fresh value was null for: " + cacheName + ":" + cachedKey + ", keeping existing cache entry");
+                        // Clean up the temporary entry
+                        cache.evict(tempKey);
+                    }
+                } catch (Exception serviceException) {
+                    // Service call failed, restore the original value if needed
+                    System.err.println("Service call failed for key: " + cacheName + ":" + cachedKey + ", keeping existing cache entry. Error: " + serviceException.getMessage());
+                    
+                    // If somehow the original value was removed, restore it
+                    if (existingValue != null && cache.get(cachedKey) == null) {
+                        cache.put(cachedKey, existingValue.get());
+                        System.out.println("Restored original cache value after service failure");
                     }
                 }
-            } catch (Exception e) {
-                System.err.println("Error refreshing cache entry: " + e.getMessage());
                 
-                // Reschedule even on error, with default TTL
-                String cacheKeyStr = keyInfo.getCacheName() + ":" + keyInfo.getKey();
-                if (activeCacheKeys.containsKey(cacheKeyStr)) {
-                    keyInfo.setNextRefreshTime(Instant.now().plusSeconds(keyInfo.getTtlSeconds()));
-                    System.out.println("Rescheduling after error for: " + keyInfo.getNextRefreshTime());
-                    scheduleRefresh(keyInfo);
+                // Reschedule for next TTL period
+                String cacheKeyStr = cacheName + ":" + cachedKey;
+                CacheKeyInfo updatedInfo = activeCacheKeys.get(cacheKeyStr);
+                if (updatedInfo != null) {
+                    // Use the possibly updated TTL value
+                    System.out.println("Next refresh scheduled for: " + updatedInfo.getNextRefreshTime() + " (TTL: " + updatedInfo.getTtlSeconds() + " seconds)");
+                    scheduleRefresh(updatedInfo);
                 }
             }
-        }, keyInfo.getNextRefreshTime());
+        } catch (Exception e) {
+            System.err.println("Error refreshing cache entry: " + e.getMessage());
+            e.printStackTrace(); // More detailed logging for troubleshooting
+            
+            // Reschedule even on error, with default TTL
+            String cacheKeyStr = keyInfo.getCacheName() + ":" + keyInfo.getKey();
+            if (activeCacheKeys.containsKey(cacheKeyStr)) {
+                keyInfo.setNextRefreshTime(Instant.now().plusSeconds(keyInfo.getTtlSeconds()));
+                System.out.println("Rescheduling after error for: " + keyInfo.getNextRefreshTime());
+                scheduleRefresh(keyInfo);
+            }
+        }
     }
     
     /**
      * Helper class to store cache key information with TTL
      */
-    private static class CacheKeyInfo {
+    static class CacheKeyInfo {
         private final String cacheName;
         private final String key;
         private Instant nextRefreshTime;
