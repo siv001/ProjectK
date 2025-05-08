@@ -3,6 +3,8 @@ package org.projectk.config;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import org.projectk.service.ServiceOneClient;
 import org.projectk.service.ServiceTwoClient;
+import org.projectk.service.ServiceThreeClient;
+import org.springframework.cache.interceptor.KeyGenerator;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.EnableCaching;
@@ -62,8 +64,14 @@ public class CacheConfig {
     }
 
     @Bean
+    public KeyGenerator employeeKeyGenerator() {
+        return new EmployeeKeyGenerator();
+    }
+    
+    @Bean
     public CacheManager cacheManager(ServiceOneClient oneClient,
                                      ServiceTwoClient twoClient,
+                                     ServiceThreeClient threeClient,
                                      ScheduledExecutorService cacheRefreshExecutor) {
         this.cacheManager = new CustomCaffeineCacheManager();
 
@@ -83,6 +91,15 @@ public class CacheConfig {
                         .expireAfterWrite(300, TimeUnit.SECONDS)
                         .executor(cacheRefreshExecutor),
                 key -> twoClient.fetchFresh((String) key)
+        );
+        
+        // Service Three cache with Employee objects: expires 5m after write, uses dynamic TTL-based refresh
+        this.cacheManager.registerCache(
+                "serviceThreeCache",
+                Caffeine.newBuilder()
+                        .expireAfterWrite(300, TimeUnit.SECONDS)
+                        .executor(cacheRefreshExecutor),
+                key -> threeClient.fetchFresh(key)
         );
 
         return this.cacheManager;
