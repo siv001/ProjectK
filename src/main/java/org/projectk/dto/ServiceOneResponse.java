@@ -5,5 +5,6 @@ import lombok.Data;
 @Data
 public class ServiceOneResponse {
     private String data;
-    private long   ttl;     // Time to live in seconds
+    private long   ttl;           // Time to live in seconds
+    private long   pollFrequency; // Frequency to poll for changes after TTL expiration in seconds
 }

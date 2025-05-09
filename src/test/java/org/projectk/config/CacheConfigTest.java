@@ -9,6 +9,7 @@ import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.projectk.service.ServiceOneClient;
 import org.projectk.service.ServiceTwoClient;
+import org.projectk.service.ServiceThreeClient;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
 
@@ -34,9 +35,15 @@ public class CacheConfigTest {
 
     @Mock
     private ServiceTwoClient serviceTwoClient;
+    
+    @Mock
+    private ServiceThreeClient serviceThreeClient;
 
     @Mock
     private ScheduledExecutorService scheduledExecutorService;
+
+    @Mock
+    private CustomCaffeineCacheManager customCaffeineCacheManager;
     
     @Mock
     private TaskScheduler taskScheduler;
@@ -62,10 +69,15 @@ public class CacheConfigTest {
     void testCacheManagerCreation() {
         // Create a real CacheConfig for this test to avoid mocking complexities
         CacheConfig realCacheConfig = new CacheConfig();
+        // Create a CustomCaffeineCacheManager for the test
+        CustomCaffeineCacheManager testCacheManager = new CustomCaffeineCacheManager();
+        
         CacheManager cacheManager = realCacheConfig.cacheManager(
             serviceOneClient,
             serviceTwoClient,
-            scheduledExecutorService
+            serviceThreeClient,
+            scheduledExecutorService,
+            testCacheManager
         );
 
         assertNotNull(cacheManager, "Cache manager should be created");
@@ -121,13 +133,13 @@ public class CacheConfigTest {
         realCacheConfig.trackCacheKey(cacheName, key, ttlSeconds);
         
         // Verify
-        Map<String, CacheConfig.CacheKeyInfo> activeCacheKeys = realCacheConfig.getActiveCacheKeys();
+        Map<String, CacheKeyInfo> activeCacheKeys = realCacheConfig.getActiveCacheKeys();
         assertEquals(1, activeCacheKeys.size(), "Should have one tracked key");
         
         String cacheKeyStr = cacheName + ":" + key;
         assertTrue(activeCacheKeys.containsKey(cacheKeyStr), "Should contain the tracked key");
         
-        CacheConfig.CacheKeyInfo keyInfo = activeCacheKeys.get(cacheKeyStr);
+        CacheKeyInfo keyInfo = activeCacheKeys.get(cacheKeyStr);
         assertEquals(cacheName, keyInfo.getCacheName(), "Cache name should match");
         assertEquals(key, keyInfo.getKey(), "Key should match");
         assertEquals(ttlSeconds, keyInfo.getTtlSeconds(), "TTL should match");
@@ -146,7 +158,7 @@ public class CacheConfigTest {
         
         // Verify minimum TTL enforced (should be 60 seconds per implementation)
         String cacheKeyStr = cacheName + ":" + key;
-        CacheConfig.CacheKeyInfo keyInfo = realCacheConfig.getActiveCacheKeys().get(cacheKeyStr);
+        CacheKeyInfo keyInfo = realCacheConfig.getActiveCacheKeys().get(cacheKeyStr);
         assertEquals(60, keyInfo.getTtlSeconds(), "TTL should be adjusted to minimum");
     }
     
@@ -165,7 +177,7 @@ public class CacheConfigTest {
         
         // Verify
         String cacheKeyStr = cacheName + ":" + key;
-        CacheConfig.CacheKeyInfo keyInfo = realCacheConfig.getActiveCacheKeys().get(cacheKeyStr);
+        CacheKeyInfo keyInfo = realCacheConfig.getActiveCacheKeys().get(cacheKeyStr);
         assertEquals(180, keyInfo.getTtlSeconds(), "TTL should be updated");
     }
     
@@ -186,7 +198,7 @@ public class CacheConfigTest {
         
         // Verify that the tracking logic works correctly
         config.trackCacheKey(cacheName, key, ttlSeconds);
-        Map<String, CacheConfig.CacheKeyInfo> activeCacheKeys = config.getActiveCacheKeys();
+        Map<String, CacheKeyInfo> activeCacheKeys = config.getActiveCacheKeys();
         String cacheKeyStr = cacheName + ":" + key;
         
         // Assert proper tracking

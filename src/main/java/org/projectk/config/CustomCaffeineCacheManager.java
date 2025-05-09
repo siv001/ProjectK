@@ -33,6 +33,16 @@ public class CustomCaffeineCacheManager extends CaffeineCacheManager {
         loaders.put(name, loader);
         setCacheNames(loaders.keySet());
     }
+    
+    /**
+     * Gets the cache loader for a specific cache name
+     * 
+     * @param cacheName The name of the cache
+     * @return The cache loader associated with the cache, or null if none exists
+     */
+    public CacheLoader<Object, Object> getLoader(String cacheName) {
+        return loaders.get(cacheName);
+    }
 
     @Override
     @NonNull

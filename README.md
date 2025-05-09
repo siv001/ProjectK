@@ -333,3 +333,5 @@ The ML-Enhanced Circuit Breaker is designed to be extensible:
 - H2 Database (for metrics persistence)
 - Redis (optional, for TimeSeries storage)
 - TestContainers (optional, for embedded Redis)
+
+lsof -i :8080 | grep LISTEN | awk '{print $2}' | xargs -r kill -9

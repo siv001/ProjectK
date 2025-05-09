@@ -22,11 +22,16 @@ public class ServiceOneClient {
         ServiceOneResponse response = new ServiceOneResponse();// rest.getForObject(url, ServiceOneResponse.class);
         response.setData(id);
         response.setTtl(60); // Simulate a TTL of 60 seconds
+        response.setPollFrequency(30); // Simulate a poll frequency of 30 seconds after TTL expires
+        
         // Track the key with its TTL for dynamic refresh scheduling
         if (response != null) {
-            // Debug output to verify TTL value
-            System.out.println("ServiceOne response for key " + id + " has TTL: " + response.getTtl() + " seconds");
-            cacheConfig.trackCacheKey("serviceOneCache", id, response.getTtl());
+            // Debug output to verify TTL and poll frequency values
+            System.out.println("ServiceOne response for key " + id + " has TTL: " + response.getTtl() + " seconds" +
+                               " and poll frequency: " + response.getPollFrequency() + " seconds");
+            
+            // Track the key with the existing cache config for TTL-based refresh
+            cacheConfig.trackCacheKey("serviceOneCache", id, response.getTtl(), response.getPollFrequency());
         }
         
         return response;

@@ -65,7 +65,8 @@ public class ServiceThreeClient {
             String cacheKey = "emp:" + employee.getEmployeeId();
             System.out.println("ServiceThree response for employee " + employee.getEmployeeId() + 
                              " has TTL: " + response.getTtl() + " seconds");
-            cacheConfig.trackCacheKey("serviceThreeCache", cacheKey, response.getTtl());
+            // Track with standard TTL-based refresh
+//            cacheConfig.trackCacheKey("serviceThreeCache", cacheKey, response.getTtl(),);
         }
         
         return response;

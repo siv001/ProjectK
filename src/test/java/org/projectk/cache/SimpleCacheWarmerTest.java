@@ -31,6 +31,7 @@ class SimpleCacheWarmerTest {
 
     @BeforeEach
     void setUp() {
+        // SimpleCacheWarmer uses the existing service clients
         cacheWarmer = new SimpleCacheWarmer(serviceOneClient, serviceTwoClient);
     }
 

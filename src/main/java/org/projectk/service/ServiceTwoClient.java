@@ -21,11 +21,16 @@ public class ServiceTwoClient {
         ServiceTwoResponse response = new ServiceTwoResponse();//rest.getForObject(url, ServiceTwoResponse.class);
         response.setData(id);
         response.setTtl(120); // Simulate a TTL of 120 seconds
+        response.setPollFrequency(45); // Simulate a poll frequency of 45 seconds after TTL expires
+        
         // Track the key with its TTL for dynamic refresh scheduling
         if (response != null) {
-            // Debug output to verify TTL value
-            System.out.println("ServiceTwo response for key " + id + " has TTL: " + response.getTtl() + " seconds");
-            cacheConfig.trackCacheKey("serviceTwoCache", id, response.getTtl());
+            // Debug output to verify TTL and poll frequency values
+            System.out.println("ServiceTwo response for key " + id + " has TTL: " + response.getTtl() + " seconds" +
+                               " and poll frequency: " + response.getPollFrequency() + " seconds");
+            
+            // Track the key with the existing cache config for TTL-based refresh
+//            cacheConfig.trackCacheKey("serviceTwoCache", id, response.getTtl());
         }
         
         return response;

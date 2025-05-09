@@ -1,6 +1,8 @@
 package org.projectk.config;
 
 import com.github.benmanes.caffeine.cache.Caffeine;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.projectk.service.ServiceOneClient;
 import org.projectk.service.ServiceTwoClient;
 import org.projectk.service.ServiceThreeClient;
@@ -26,6 +28,7 @@ import java.util.concurrent.*;
 @EnableScheduling
 @EnableAsync
 public class CacheConfig {
+    private static final Logger logger = LoggerFactory.getLogger(CacheConfig.class);
 
     // Track cache keys with their TTL information
     private final Map<String, CacheKeyInfo> activeCacheKeys = new ConcurrentHashMap<>();
@@ -69,11 +72,18 @@ public class CacheConfig {
     }
     
     @Bean
+    public CustomCaffeineCacheManager customCaffeineCacheManager() {
+        return new CustomCaffeineCacheManager();
+    }
+    
+    @Bean
+    @Primary
     public CacheManager cacheManager(ServiceOneClient oneClient,
                                      ServiceTwoClient twoClient,
                                      ServiceThreeClient threeClient,
-                                     ScheduledExecutorService cacheRefreshExecutor) {
-        this.cacheManager = new CustomCaffeineCacheManager();
+                                     ScheduledExecutorService cacheRefreshExecutor,
+                                     CustomCaffeineCacheManager customCaffeineCacheManager) {
+        this.cacheManager = customCaffeineCacheManager;
 
         // Service One cache: expires 10m after write, uses dynamic TTL-based refresh
         this.cacheManager.registerCache(
@@ -92,15 +102,15 @@ public class CacheConfig {
                         .executor(cacheRefreshExecutor),
                 key -> twoClient.fetchFresh((String) key)
         );
-        
-        // Service Three cache with Employee objects: expires 5m after write, uses dynamic TTL-based refresh
-        this.cacheManager.registerCache(
-                "serviceThreeCache",
-                Caffeine.newBuilder()
-                        .expireAfterWrite(300, TimeUnit.SECONDS)
-                        .executor(cacheRefreshExecutor),
-                key -> threeClient.fetchFresh(key)
-        );
+//
+//        // Service Three cache with Employee objects: expires 5m after write, uses dynamic TTL-based refresh
+//        this.cacheManager.registerCache(
+//                "serviceThreeCache",
+//                Caffeine.newBuilder()
+//                        .expireAfterWrite(300, TimeUnit.SECONDS)
+//                        .executor(cacheRefreshExecutor),
+//                key -> threeClient.fetchFresh(key)
+//        );
 
         return this.cacheManager;
     }
@@ -124,6 +134,19 @@ public class CacheConfig {
      * @param ttlSeconds The TTL value in seconds from the service response
      */
     public void trackCacheKey(String cacheName, String key, long ttlSeconds) {
+        // Use a default poll frequency that's 1/3 of the TTL, with a minimum of 10 seconds
+        long defaultPollFrequency = Math.max(ttlSeconds / 3, 10);
+        trackCacheKey(cacheName, key, ttlSeconds, defaultPollFrequency);
+    }
+    
+    /**
+     * Track a cache key with its TTL and poll frequency for scheduled refreshing
+     * @param cacheName The name of the cache
+     * @param key The cache key
+     * @param ttlSeconds The TTL value in seconds from the service response
+     * @param pollFrequency The polling frequency in seconds to use when data hasn't changed
+     */
+    public void trackCacheKey(String cacheName, String key, long ttlSeconds, long pollFrequency) {
         // Minimum TTL of 30 seconds to avoid excessive refreshing
         ttlSeconds = Math.max(ttlSeconds, 60);
         
@@ -135,13 +158,13 @@ public class CacheConfig {
         
         if (keyInfo == null) {
             // First time we're seeing this key
-            keyInfo = new CacheKeyInfo(cacheName, key, refreshTime, ttlSeconds);
+            keyInfo = new CacheKeyInfo(cacheName, key, refreshTime,Instant.now(), ttlSeconds, pollFrequency);
             activeCacheKeys.put(cacheKey, keyInfo);
-            System.out.println("First tracking of key: " + cacheKey + ", scheduling refresh at: " + refreshTime + " (TTL: " + ttlSeconds + " seconds)");
+            logger.info("First tracking of key: {} scheduling refresh at: {} (TTL: {} seconds)", cacheKey, refreshTime, ttlSeconds);
             scheduleRefresh(keyInfo);
         } else {
             // Update existing key info with new TTL
-            System.out.println("Updating existing key: " + cacheKey + ", old refresh at: " + keyInfo.getNextRefreshTime() + ", new refresh at: " + refreshTime);
+            logger.info("Updating existing key: {}, old refresh at: {}, new refresh at: {}", cacheKey, keyInfo.getNextRefreshTime(), refreshTime);
             keyInfo.setNextRefreshTime(refreshTime);
             keyInfo.setTtlSeconds(ttlSeconds);
             // We'll let the existing scheduled task finish - no need to reschedule now
@@ -171,7 +194,7 @@ public class CacheConfig {
                 Object cachedKey = keyInfo.getKey();
                 Cache cache = cacheManager.getCache(cacheName);
                 
-                System.out.println("Refreshing cache entry asynchronously: " + cacheName + ":" + cachedKey + " at " + Instant.now());
+                logger.info("Refreshing cache entry asynchronously: {}:{} at {}", cacheName, cachedKey, Instant.now());
                 
                 // Store the existing value before attempting refresh
                 Cache.ValueWrapper existingValue = cache.get(cachedKey);
@@ -186,92 +209,122 @@ public class CacheConfig {
                     Cache.ValueWrapper freshValueWrapper = cache.get(tempKey);
                     
                     if (freshValueWrapper != null && freshValueWrapper.get() != null) {
-                        // Successfully fetched fresh value, now update the real cache entry
+                        // Successfully fetched fresh value, now compare with existing value
                         Object freshValue = freshValueWrapper.get();
-                        cache.put(cachedKey, freshValue);
-                        System.out.println("Successfully refreshed cache entry: " + cacheName + ":" + cachedKey);
+                        Object existingValueObj = existingValue != null ? existingValue.get() : null;
+                        
+                        // Calculate hash for both objects to check if content has changed
+                        int freshHash = freshValue != null ? freshValue.hashCode() : 0;
+                        int existingHash = existingValueObj != null ? existingValueObj.hashCode() : -1;
+                        
+                        if (freshHash != existingHash) {
+                            // Only update if hash values are different (data has changed)
+                            cache.put(cachedKey, freshValue);
+                            keyInfo.setLastRefreshTime(Instant.now());
+                            
+                            // Check if we should update based on original schedule or current time
+                            Instant now = Instant.now();
+                            Instant originalNext = keyInfo.getOriginalScheduleTime();
+                            
+                            // If current time is beyond the original next schedule time
+                            // use the original schedule's next interval
+                            if (now.isAfter(originalNext)) {
+                                // Find the next future schedule time that maintains the original pattern
+                                while (originalNext.isBefore(now)) {
+                                    keyInfo.updateOriginalScheduleTime();
+                                    originalNext = keyInfo.getOriginalScheduleTime();
+                                }
+                                keyInfo.setNextRefreshTime(originalNext);
+                                logger.info("Successfully refreshed cache entry with new data: {}:{}, maintaining original schedule at {}", 
+                                        cacheName, cachedKey, keyInfo.getNextRefreshTime());
+                            } else {
+                                // Otherwise use the original schedule time
+                                keyInfo.setNextRefreshTime(originalNext);
+                                logger.info("Successfully refreshed cache entry with new data: {}:{}, resuming original schedule at {}", 
+                                        cacheName, cachedKey, keyInfo.getNextRefreshTime());
+                            }
+                        } else {
+                            // Data didn't change, schedule next check using poll frequency
+                            // BUT never exceed the original schedule time
+                            Instant pollTime = Instant.now().plusSeconds(keyInfo.getPollFrequency());
+                            Instant originalNext = keyInfo.getOriginalScheduleTime();
+                            
+                            // Use the earlier of poll time or original schedule time
+                            if (pollTime.isBefore(originalNext)) {
+                                keyInfo.setNextRefreshTime(pollTime);
+                                logger.info("Skipping cache update as data hasn't changed: {}:{}, polling again at {}", 
+                                        cacheName, cachedKey, keyInfo.getNextRefreshTime());
+                            } else {
+                                keyInfo.setNextRefreshTime(originalNext);
+                                logger.info("Skipping cache update as data hasn't changed: {}:{}, reverting to original schedule at {}", 
+                                        cacheName, cachedKey, keyInfo.getNextRefreshTime());
+                            }
+                        }
                         
                         // Clean up the temporary entry
                         cache.evict(tempKey);
                     } else {
-                        System.out.println("Fresh value was null for: " + cacheName + ":" + cachedKey + ", keeping existing cache entry");
+                        // Service returned null, schedule retry using poll frequency
+                        // BUT never exceed the original schedule time
+                        Instant pollTime = Instant.now().plusSeconds(keyInfo.getPollFrequency());
+                        Instant originalNext = keyInfo.getOriginalScheduleTime();
+                        
+                        // Use the earlier of poll time or original schedule time
+                        if (pollTime.isBefore(originalNext)) {
+                            keyInfo.setNextRefreshTime(pollTime);
+                            logger.info("Fresh value was null for: {}:{}, polling again at {}", 
+                                    cacheName, cachedKey, keyInfo.getNextRefreshTime());
+                        } else {
+                            keyInfo.setNextRefreshTime(originalNext);
+                            logger.info("Fresh value was null for: {}:{}, reverting to original schedule at {}", 
+                                    cacheName, cachedKey, keyInfo.getNextRefreshTime());
+                        }
                         // Clean up the temporary entry
                         cache.evict(tempKey);
                     }
                 } catch (Exception serviceException) {
                     // Service call failed, restore the original value if needed
-                    System.err.println("Service call failed for key: " + cacheName + ":" + cachedKey + ", keeping existing cache entry. Error: " + serviceException.getMessage());
+                    logger.error("Service call failed for key: {}:{}, keeping existing cache entry. Error: {}", cacheName, cachedKey, serviceException.getMessage());
                     
                     // If somehow the original value was removed, restore it
                     if (existingValue != null && cache.get(cachedKey) == null) {
                         cache.put(cachedKey, existingValue.get());
-                        System.out.println("Restored original cache value after service failure");
+                        logger.info("Restored original cache value after service failure");
+                    }
+                    
+                    // Schedule retry using poll frequency for backoff after error
+                    // BUT never exceed the original schedule time
+                    Instant pollTime = Instant.now().plusSeconds(keyInfo.getPollFrequency());
+                    Instant originalNext = keyInfo.getOriginalScheduleTime();
+                    
+                    // Use the earlier of poll time or original schedule time
+                    if (pollTime.isBefore(originalNext)) {
+                        keyInfo.setNextRefreshTime(pollTime);
+                        logger.info("Service error occurred, polling again at {}", keyInfo.getNextRefreshTime());
+                    } else {
+                        keyInfo.setNextRefreshTime(originalNext);
+                        logger.info("Service error occurred, reverting to original schedule at {}", keyInfo.getNextRefreshTime());
                     }
                 }
-                
-                // Reschedule for next TTL period
-                String cacheKeyStr = cacheName + ":" + cachedKey;
-                CacheKeyInfo updatedInfo = activeCacheKeys.get(cacheKeyStr);
-                if (updatedInfo != null) {
-                    // Use the possibly updated TTL value
-                    System.out.println("Next refresh scheduled for: " + updatedInfo.getNextRefreshTime() + " (TTL: " + updatedInfo.getTtlSeconds() + " seconds)");
-                    scheduleRefresh(updatedInfo);
-                }
+
+                // Schedule the next refresh based on the updated nextRefreshTime
+                // The nextRefreshTime will have been set in one of the above blocks based on the outcome
+                scheduleRefresh(keyInfo);
             }
         } catch (Exception e) {
-            System.err.println("Error refreshing cache entry: " + e.getMessage());
-            e.printStackTrace(); // More detailed logging for troubleshooting
-            
+            logger.error("Error refreshing cache entry: {}", e.getMessage());
+            logger.error("Error stack trace:", e); // More detailed logging for troubleshooting
+
             // Reschedule even on error, with default TTL
             String cacheKeyStr = keyInfo.getCacheName() + ":" + keyInfo.getKey();
             if (activeCacheKeys.containsKey(cacheKeyStr)) {
                 keyInfo.setNextRefreshTime(Instant.now().plusSeconds(keyInfo.getTtlSeconds()));
-                System.out.println("Rescheduling after error for: " + keyInfo.getNextRefreshTime());
+                logger.info("Rescheduling after error for: {}", keyInfo.getNextRefreshTime());
                 scheduleRefresh(keyInfo);
             }
         }
     }
-    
-    /**
-     * Helper class to store cache key information with TTL
-     */
-    static class CacheKeyInfo {
-        private final String cacheName;
-        private final String key;
-        private Instant nextRefreshTime;
-        private long ttlSeconds;
-        
-        public CacheKeyInfo(String cacheName, String key, Instant nextRefreshTime, long ttlSeconds) {
-            this.cacheName = cacheName;
-            this.key = key;
-            this.nextRefreshTime = nextRefreshTime;
-            this.ttlSeconds = ttlSeconds;
-        }
-        
-        public String getCacheName() {
-            return cacheName;
-        }
-        
-        public String getKey() {
-            return key;
-        }
-        
-        public Instant getNextRefreshTime() {
-            return nextRefreshTime;
-        }
-        
-        public void setNextRefreshTime(Instant nextRefreshTime) {
-            this.nextRefreshTime = nextRefreshTime;
-        }
-        
-        public long getTtlSeconds() {
-            return ttlSeconds;
-        }
-        
-        public void setTtlSeconds(long ttlSeconds) {
-            this.ttlSeconds = ttlSeconds;
-        }
-    }
+
 
     @Bean
     public RestTemplate restTemplate() {
